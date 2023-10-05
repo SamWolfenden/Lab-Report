@@ -57,3 +57,9 @@ class UNet(nn.Module):
         x = self.decoder[5](x)
         x = self.decoder[6](x)
         return x
+
+    def dice_coefficient(self, predicted, target, smooth=1e-5):
+        #smooth used to prevent division by 0
+        intersection = (predicted * target).sum()
+        union = predicted.sum() + target.sum()
+        return (2.0 * intersection + smooth) / (union + smooth)
