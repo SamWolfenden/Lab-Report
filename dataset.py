@@ -6,6 +6,7 @@ from PIL import Image
 from torchvision import transforms
 import numpy as np
 
+
 class ISICDataset(Dataset):
     def __init__(self, root_dir, transform=None):
         self.root_dir = root_dir
@@ -48,24 +49,36 @@ if __name__ == "__main__":
     # Create an instance of the ISICDataset class
     dataset = ISICDataset(root_dir=dataset_root, transform=transform)
 
-    # Display a sample image and its corresponding superpixel label
-    sample_idx = 0  # Change the index to display different samples
-    sample_image, sample_label = dataset[sample_idx]
+    print(f"Number of samples in the dataset: {len(dataset)}")
 
-    # Convert the tensor to a NumPy array for display
-    sample_image = sample_image.permute(1, 2, 0).numpy()
+    sample_idx = 1999  # Change the index to display different samples
 
-    # Plot the image and superpixel label
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
-    plt.imshow(sample_image)
-    plt.title('Sample Image')
-    plt.axis('off')
+    if sample_idx < len(dataset):
+        sample_image, sample_label = dataset[sample_idx]
 
-    plt.subplot(1, 2, 2)
-    plt.imshow(sample_label.squeeze(), cmap='viridis')  # Squeeze the label tensor to 2D
-    plt.title('Superpixel Label')
-    plt.axis('off')
+        # Convert the tensor to a NumPy array and transpose the dimensions
+        sample_image = sample_image.permute(1, 2, 0).numpy()
 
-    plt.show()
+        # Plot the image and superpixel label
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.imshow(sample_image)
+        plt.title('Sample Image')
+        plt.axis('off')
+
+        # Print the filename underneath the image
+        plt.text(0, -20, dataset.image_files[sample_idx], fontsize=10, color='black')
+
+        if sample_label is not None:
+            plt.subplot(1, 2, 2)
+            plt.imshow(sample_label.squeeze() if sample_label is not None else None, cmap='viridis')
+            plt.title('Superpixel Label')
+            plt.axis('off')
+
+            # Print the filename underneath the label
+            plt.text(0, -20, dataset.label_files[sample_idx], fontsize=10, color='black')
+
+        plt.show()
+    else:
+        print(f"Invalid sample index. The dataset contains {len(dataset)} samples.")
 """
