@@ -1,84 +1,64 @@
 import os
-import matplotlib.pyplot as plt
+import cv2
+import numpy as np
 import torch
 from torch.utils.data import Dataset
-from PIL import Image
-from torchvision import transforms
-import numpy as np
 
+class DataGenerator(Dataset):
+    def __init__(self, img_list, batch_size, img_size, img_channel=3):
+        self.img_paths = np.array(img_list)
+        self.batch_size = batch_size
+        self.img_size = img_size
+        self.img_channel = img_channel
+        self.data_count = 0  # Initialize data count
+        self.on_epoch_end()
 
-class ISICDataset(Dataset):
-    def __init__(self, root_dir, transform=None):
-        self.root_dir = root_dir
-        self.transform = transform
-
-        # Determine the directory based on the provided root_dir
-        self.data_dir = root_dir
-
-        # List all image files in the data directory
-        self.image_files = [f for f in os.listdir(self.data_dir) if f.endswith('.jpg')]
-
-        # List all superpixel label files in the data directory
-        self.label_files = [f for f in os.listdir(self.data_dir) if f.endswith('_superpixels.png')]
+    def on_epoch_end(self):
+        self.indices = np.arange(len(self.img_paths))
+        np.random.shuffle(self.indices)
 
     def __len__(self):
-        return len(self.image_files)
+        return len(self.img_paths)
 
     def __getitem__(self, idx):
-        img_name = os.path.join(self.data_dir, self.image_files[idx])
-        label_name = os.path.join(self.data_dir, self.label_files[idx])
+        batch_img = self.img_paths[idx * self.batch_size:(idx + 1) * self.batch_size]
+        x = np.zeros((self.batch_size, self.img_channel, *self.img_size), dtype=np.uint8)
 
-        image = Image.open(img_name)
-        label = Image.open(label_name).convert('L')  # Convert label to grayscale
+        for i, img_path in enumerate(batch_img):
+            img = cv2.imread(img_path)
+            img = cv2.resize(img, self.img_size)
+            if img.shape[-1] != self.img_channel:
+                img = img[..., :self.img_channel]
 
-        if self.transform:
-            image = self.transform(image)
-            label = self.transform(label)
+            # Print pixel values before normalization
+            #print("Max Value (Before Normalization):", img.max())
+            #print("Min Value (Before Normalization):", img.min())
 
-        return image, label
+            x[i] = np.moveaxis(img, -1, 0)  # Change the channel dimension to the front
 
-"""
-if __name__ == "__main__":
-    # Define the directory where the ISIC dataset is located
-    dataset_root = r'C:\Users\sam\Downloads\ISIC-2017_Training_Data'
+        x = torch.tensor(x, dtype=torch.float32) / 255
 
-    # Create a transform for image preprocessing
-    transform = transforms.Compose([transforms.Resize((256, 256)),
-                                    transforms.ToTensor()])
+        # Update data count for each batch
+        self.data_count += len(x)
 
-    # Create an instance of the ISICDataset class
-    dataset = ISICDataset(root_dir=dataset_root, transform=transform)
+        # Print pixel values after normalization
+        #print("Max Value (After Normalization):", x.max().item())
+        #print("Min Value (After Normalization):", x.min().item())
+        return x
 
-    print(f"Number of samples in the dataset: {len(dataset)}")
+def get_loader(train_input_dir, val_input_dir, batch_size=8, img_size=(3, 256, 256), seed=1234, img_channel=3, logger=None):
+    train_img_paths = sorted(
+        [os.path.join(train_input_dir, fname) for fname in os.listdir(train_input_dir) if fname.endswith(".jpg")]
+    )
 
-    sample_idx = 1999  # Change the index to display different samples
+    val_img_paths = sorted(
+        [os.path.join(val_input_dir, fname) for fname in os.listdir(val_input_dir) if fname.endswith(".jpg")]
+    )
 
-    if sample_idx < len(dataset):
-        sample_image, sample_label = dataset[sample_idx]
+    train = DataGenerator(train_img_paths, batch_size, img_size, img_channel=img_channel)
+    val = DataGenerator(val_img_paths, batch_size, img_size, img_channel=img_channel)
 
-        # Convert the tensor to a NumPy array and transpose the dimensions
-        sample_image = sample_image.permute(1, 2, 0).numpy()
+    if logger:
+        logger.info("Data Loader is successfully loaded!")
 
-        # Plot the image and superpixel label
-        plt.figure(figsize=(10, 5))
-        plt.subplot(1, 2, 1)
-        plt.imshow(sample_image)
-        plt.title('Sample Image')
-        plt.axis('off')
-
-        # Print the filename underneath the image
-        plt.text(0, -20, dataset.image_files[sample_idx], fontsize=10, color='black')
-
-        if sample_label is not None:
-            plt.subplot(1, 2, 2)
-            plt.imshow(sample_label.squeeze() if sample_label is not None else None, cmap='viridis')
-            plt.title('Superpixel Label')
-            plt.axis('off')
-
-            # Print the filename underneath the label
-            plt.text(0, -20, dataset.label_files[sample_idx], fontsize=10, color='black')
-
-        plt.show()
-    else:
-        print(f"Invalid sample index. The dataset contains {len(dataset)} samples.")
-"""
+    return train, val
