@@ -1,64 +1,64 @@
 import os
-import cv2
-import numpy as np
+from PIL import Image
 import torch
-from torch.utils.data import Dataset
+from torchvision import transforms
+from torch.utils.data import DataLoader, Dataset
 
-class DataGenerator(Dataset):
-    def __init__(self, img_list, batch_size, img_size, img_channel=3):
-        self.img_paths = np.array(img_list)
-        self.batch_size = batch_size
-        self.img_size = img_size
-        self.img_channel = img_channel
-        self.data_count = 0  # Initialize data count
-        self.on_epoch_end()
+class CustomDataset(Dataset):
+    def __init__(self, image_dir, mask_dir, transform=None):
+        self.image_dir = image_dir
+        self.mask_dir = mask_dir
 
-    def on_epoch_end(self):
-        self.indices = np.arange(len(self.img_paths))
-        np.random.shuffle(self.indices)
+        self.image_files = [file for file in os.listdir(image_dir) if file.endswith('.jpg')]
+        self.mask_files = [file for file in os.listdir(mask_dir) if file.endswith('_segmentation.png')]
+
+        self.transform = transform
 
     def __len__(self):
-        return len(self.img_paths)
+        return len(self.image_files)
 
     def __getitem__(self, idx):
-        batch_img = self.img_paths[idx * self.batch_size:(idx + 1) * self.batch_size]
-        x = np.zeros((self.batch_size, self.img_channel, *self.img_size), dtype=np.uint8)
+        img_name = os.path.join(self.image_dir, self.image_files[idx])
+        mask_name = os.path.join(self.mask_dir, self.mask_files[idx])
 
-        for i, img_path in enumerate(batch_img):
-            img = cv2.imread(img_path)
-            img = cv2.resize(img, self.img_size)
-            if img.shape[-1] != self.img_channel:
-                img = img[..., :self.img_channel]
+        image = Image.open(img_name)
+        mask = Image.open(mask_name)
 
-            # Print pixel values before normalization
-            #print("Max Value (Before Normalization):", img.max())
-            #print("Min Value (Before Normalization):", img.min())
+        # Ensure consistent sizing
+        image = image.resize((256, 256), Image.ANTIALIAS)
+        mask = mask.resize((256, 256), Image.ANTIALIAS)
 
-            x[i] = np.moveaxis(img, -1, 0)  # Change the channel dimension to the front
+        if self.transform is not None:
+            image = self.transform(image)
+            mask = self.transform(mask)
 
-        x = torch.tensor(x, dtype=torch.float32) / 255
+        return image, mask
 
-        # Update data count for each batch
-        self.data_count += len(x)
 
-        # Print pixel values after normalization
-        #print("Max Value (After Normalization):", x.max().item())
-        #print("Min Value (After Normalization):", x.min().item())
-        return x
+def get_loader(image_dir, mask_dir, batch_size, num_workers, transform=None):
+    if transform is None:
+        transform = transforms.Compose([transforms.ToTensor()])
 
-def get_loader(train_input_dir, val_input_dir, batch_size=8, img_size=(3, 256, 256), seed=1234, img_channel=3, logger=None):
-    train_img_paths = sorted(
-        [os.path.join(train_input_dir, fname) for fname in os.listdir(train_input_dir) if fname.endswith(".jpg")]
-    )
+    dataset = CustomDataset(image_dir, mask_dir, transform=transform)
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
 
-    val_img_paths = sorted(
-        [os.path.join(val_input_dir, fname) for fname in os.listdir(val_input_dir) if fname.endswith(".jpg")]
-    )
+    return loader
 
-    train = DataGenerator(train_img_paths, batch_size, img_size, img_channel=img_channel)
-    val = DataGenerator(val_img_paths, batch_size, img_size, img_channel=img_channel)
 
-    if logger:
-        logger.info("Data Loader is successfully loaded!")
+if __name__ == "__main__":
+    train_input_dir = r"C:\Users\sam\Downloads\ISIC2018_Task1-2_SegmentationData_x2\ISIC2018_Task1-2_Training_Input_x2"
+    train_mask_dir = r"C:\Users\sam\Downloads\ISIC2018_Task1-2_SegmentationData_x2\ISIC2018_Task1_Training_GroundTruth_x2"
+    batch_size = 4
+    num_workers = 4
 
-    return train, val
+    # Define transformations here, if needed
+    transform = transforms.Compose([transforms.ToTensor()])
+
+    data_loader = get_loader(train_input_dir, train_mask_dir, batch_size, num_workers)
+
+    for images, masks in data_loader:
+        for i in range(batch_size):
+            image = transforms.ToPILImage()(images[i])
+            mask = transforms.ToPILImage()(masks[i])
+            image.show()
+            mask.show()
