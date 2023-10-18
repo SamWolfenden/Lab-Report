@@ -5,29 +5,27 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from dataset import get_loader, DataGenerator
+from dataset import get_loader, CustomDataset
 from modules import UNet
 
 class Train:
-    def __init__(self, model, train_loader, val_loader, learning_rate=0.045, num_epochs=10):
+    def __init__(self, model, train_loader, learning_rate, num_epochs):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
         self.train_loader = train_loader
-        self.val_loader = val_loader
         self.learning_rate = learning_rate
         self.num_epochs = num_epochs
 
         # Define loss and optimizer
-        self.criterion = nn.CrossEntropyLoss()
+        self.dice_loss = DiceLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
 
     def train(self):
         for epoch in range(self.num_epochs):
             self.model.train()
-            total_loss = 0.0
-            for batch_idx, data in enumerate(self.train_loader):
-                inputs = data.to(self.device)
-                labels = inputs
+            total_dice = 0.0
+            for batch_idx, (inputs, targets) in enumerate(self.train_loader):
+                inputs, targets = inputs.to(self.device), targets.to(self.device)
 
                 # Calculate the iteration number within the epoch
                 iteration = batch_idx
@@ -35,45 +33,58 @@ class Train:
                 # Forward pass
                 outputs = self.model(inputs)
 
-                # Compute the Cross-Entropy loss
-                loss = self.criterion(outputs, labels)
+                # Calculate the Dice coefficient
+                dice = self.calculate_dice(outputs, targets)
+                total_dice += dice
 
-                if torch.isnan(loss).any():
-                    print("Loss contains NaN values.")
+                if torch.isnan(dice).any():
+                    print("Dice coefficient contains NaN values.")
                     # Handle or log the issue and continue
 
                 # Backpropagation
                 self.optimizer.zero_grad()
-                loss.backward()
+                dice_loss = 1 - dice  # Invert Dice coefficient as it's a loss
+                dice_loss.backward()
                 self.optimizer.step()
 
-                total_loss += loss.item()
-                print(
-                    f"Epoch {epoch + 1}/{self.num_epochs}, Iteration {iteration}, Loss: {loss.item()}")
+                print(f"Epoch {epoch + 1}/{self.num_epochs}, Iteration {iteration}, Dice Coefficient: {dice.item()}")
 
-                # Break the loop after the correct number of iterations
-                if iteration == math.floor((len(train_loader)/self.train_loader.batch_size)):
-                    break
+            average_dice = total_dice / len(self.train_loader)
+            print(f"Epoch {epoch + 1}/{self.num_epochs}, Average Dice Coefficient: {average_dice}")
 
-            print(f"Epoch {epoch + 1}/{self.num_epochs}, Average Loss: {total_loss / (len(train_loader)/self.train_loader.batch_size)}")
+    def calculate_dice(self, predicted, target, smooth=1e-5):
+        predicted = torch.sigmoid(predicted)
+        intersection = torch.sum(predicted * target)
+        union = torch.sum(predicted) + torch.sum(target)
+        dice = (2.0 * intersection + smooth) / (union + smooth)
+        return dice
 
+class DiceLoss(nn.Module):
+    def __init__(self):
+        super(DiceLoss, self).__init__()
+
+    def forward(self, predicted, target, smooth=1e-5):
+        predicted = torch.sigmoid(predicted)
+        intersection = torch.sum(predicted * target)
+        union = torch.sum(predicted) + torch.sum(target)
+        dice = (2.0 * intersection + smooth) / (union + smooth)
+        return 1.0 - dice
 
 if __name__ == '__main__':
-    train_input_dir = r'C:\Users\sam\Downloads\ISIC-2017_Training_Data'
-    val_input_dir = r'C:\Users\sam\Downloads\ISIC-2017_Validation_Data'
-    #train_input_dir = r'/home/Student/s4748611/Lab-Report/ISIC-2017_Training_Data'
-    #val_input_dir = r'/home/Student/s4748611/Lab-Report/ISIC-2017_Validation_Data'
-
-    transform = transforms.Compose([
-        transforms.Resize((64, 64)),
-        transforms.ToTensor()
-    ])
-
-    train_loader, val_loader = get_loader(train_input_dir, val_input_dir, batch_size=32, img_size=(64, 64), seed=1234)
-
-    model = UNet(3,3)
-    learning_rate = 0.001
+    train_input_dir = r"C:\Users\sam\Downloads\ISIC2018_Task1-2_SegmentationData_x2\ISIC2018_Task1-2_Training_Input_x2"
+    train_mask_dir = r"C:\Users\sam\Downloads\ISIC2018_Task1-2_SegmentationData_x2\ISIC2018_Task1_Training_GroundTruth_x2"
+    batch_size = 4
+    num_workers = 4
+    learning_rate = 0.045
     num_epochs = 10
 
-    trainer = Train(model, train_loader, val_loader, learning_rate, num_epochs)
+    # Create the data loader using your CustomDataset and get_loader
+    transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+    train_loader = get_loader(train_input_dir, train_mask_dir, batch_size, num_workers, transform=transform)
+
+    model = UNet(1)
+
+    trainer = Train(model, train_loader, learning_rate, num_epochs)
     trainer.train()
